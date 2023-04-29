@@ -1,1 +1,137 @@
+//Sentinel 2 Image collection
+var Start= ee.Date('2019-01-05'); //date before burn
+var End= ee.Date('2019-12-05');  //date after burn
+var END =End.advance(50,'day');
+var geometry = geometry;
+var geometry = ee.Geometry.Polygon(
+        [[[40.510539368536755, 37.39139948607018],
+          [40.472087220099255, 37.281118661479105],
+          [40.591262607780855, 37.15802302958226],
+          [40.83708169957773, 37.179909368093256],
+          [40.909077039111786, 37.33600680260806]]]);
+
+var beforevalue=0.174
+var aftervalue=-0.045
+
+// Cloud Masking which is used for RGB visualization.
+var s1 = ee.Image('COPERNICUS/S2/20160422T084804_20160422T123809_T36TVK')
+
+
+function maskS2clouds(s1) {
+  var qa = s1.select('QA60');
+
+  // Bits 10 and 11 are clouds and cirrus, respectively.
+  var cloudBitMask = 1 << 10;
+  var cirrusBitMask = 1 << 11;
+
+  // Both flags should be set to zero, indicating clear conditions.
+  var mask = qa.bitwiseAnd(cloudBitMask).eq(0)
+      .and(qa.bitwiseAnd(cirrusBitMask).eq(0));
+
+  return s1.updateMask(mask).divide(10000);
+}
+
+//Image Collection for RGB Visualization
+var collection = ee.ImageCollection('COPERNICUS/S2')
+                  .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 20))
+                  .filterDate(Start,End)
+                  .sort('DATE_ACQUIRED',true)
+                  .map(maskS2clouds);
+                  
+var collection3 = ee.ImageCollection('COPERNICUS/S2')
+                  .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 20))
+                  .filterDate(End,END)              
+                  .sort('DATE_ACQUIRED',true)
+                  .map(maskS2clouds);                 
+
+//Image Collection for NBR visualization and calculation
+var collection2= ee.ImageCollection('COPERNICUS/S2_SR')
+                  .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 20))
+                  .filterDate(Start,End)                
+                  .filter(ee.Filter.dayOfYear(0, 365)) 
+                  .sort('DATE_ACQUIRED',true)
+
+// Calculating NBR and Using image collection properties which is means it using image collection date and satellite properties.
+var NBR = collection2.map(
+    function(collection2) {
+         return collection2.normalizedDifference(['B8','B11'])
+                  .rename('NBR')
+                  .copyProperties(collection2, ['system:time_start']); 
+    });
+// NDVI Calculation    
+var NDVI = collection2.map(
+    function(collection2) {
+         return collection2.normalizedDifference(['B8','B4'])
+                  .rename('NDVI')
+                  .copyProperties(collection2, ['system:time_start']); 
+    });    
+ 
+// Making a NBR and NDVI time series chart.  
+
+var options = {
+  title: 'Sentinel-2 Spectral Indexs NBR',
+  hAxis: {title: 'Date'},
+  vAxis: {title: 'Value'},
+  lineWidth: 1,
+  series: {
+    0: {color: 'FF0000'}, // NBR
+}};
+var options2 = {
+  title: 'Sentinel-2 Spectral Indexs NDVI',
+  hAxis: {title: 'Date'},
+  vAxis: {title: 'Value'},
+  lineWidth: 1,
+  series: {
+    0: {color: '00FF00'}, // NDVI
+}};
+print(ui.Chart.image.series(NBR, geometry, ee.Reducer.mean(), 10).setOptions(options));   
+print(ui.Chart.image.series(NDVI,geometry,ee.Reducer.mean(),10).setOptions(options2));
+
+//Visualization in below map
+// Calculating NBR again for selected area
+//Nbr layer before burn
+var nir = collection.median().select('B8');
+var swir = collection.median().select('B11');
+var nbr = nir.subtract(swir).divide(nir.add(swir)).rename('nbr');
+var clipnbr=nbr.clip(geometry); 
+//Nbr layer after burn
+var nir3 = collection3.median().select('B8');
+var swir3 = collection3.median().select('B11');
+var nbr3 = nir3.subtract(swir3).divide(nir3.add(swir3)).rename('nbr3');
+var clipnbr3=nbr3.clip(geometry); 
+
+
+//Visualization in below map this NBR layer.
+Map.centerObject(geometry, 15);
+var ndviParams = {min: -1, max: 1, palette: ['black','white', 'green']};
+Map.addLayer(clipnbr, ndviParams, 'NBR image');
+Map.addLayer(clipnbr3,ndviParams,'NBR After Image')
+// RGB Visualization
+var rgbVis = {
+  min: 0.0,
+  max: 0.3,
+  bands: ['B4', 'B3', 'B2'],
+};
+//RGB layer before burn
+var clipdata1=collection.median().clip(geometry); //defining selected geometry to image collection
+Map.addLayer(clipdata1, rgbVis , 'RGB Before');
+//RGB layer after burn
+var clipdata3=collection3.median().clip(geometry);
+var image = Map.addLayer(clipdata3, rgbVis, 'RGB Later');
+
+
+
+Export.image.toDrive({
+   image: clipdata1,
+   description: 'RGB_Before2',
+   folder:'Turkey',
+   scale: 10,
+   region: geometry,
+   maxPixels: 10e12
+   });
+
+
+
+   
+
 
